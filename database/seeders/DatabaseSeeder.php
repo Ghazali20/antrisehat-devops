@@ -3,13 +3,15 @@
 namespace Database\Seeders;
 
 use App\Models\Doctor;
+use App\Models\User;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Facades\Hash;
 
 class DatabaseSeeder extends Seeder
 {
     public function run(): void
     {
-        Doctor::firstOrCreate(
+        $docAndi = Doctor::firstOrCreate(
             ['name' => 'dr. Andi Pratama', 'practice_day' => 'Monday'],
             [
                 'poli' => 'Poli Umum',
@@ -20,7 +22,7 @@ class DatabaseSeeder extends Seeder
             ]
         );
 
-        Doctor::firstOrCreate(
+        $docSiti = Doctor::firstOrCreate(
             ['name' => 'drg. Siti Rahma', 'practice_day' => 'Tuesday'],
             [
                 'poli' => 'Poli Gigi',
@@ -28,6 +30,36 @@ class DatabaseSeeder extends Seeder
                 'start_time' => '09:00:00',
                 'end_time' => '15:00:00',
                 'max_quota' => 30,
+            ]
+        );
+
+        User::updateOrCreate(
+            ['email' => 'operator@antrisehat.id'],
+            [
+                'name' => 'Admin Operator Klinik',
+                'password' => Hash::make('operator123'),
+                'role' => 'operator',
+                'doctor_id' => null,
+            ]
+        );
+
+        User::updateOrCreate(
+            ['email' => 'dokter@antrisehat.id'],
+            [
+                'name' => 'dr. Andi Pratama',
+                'password' => Hash::make('dokter123'),
+                'role' => 'dokter',
+                'doctor_id' => $docAndi->id,
+            ]
+        );
+
+        User::updateOrCreate(
+            ['email' => 'dokter.gigi@antrisehat.id'],
+            [
+                'name' => 'drg. Siti Rahma',
+                'password' => Hash::make('dokter123'),
+                'role' => 'dokter',
+                'doctor_id' => $docSiti->id,
             ]
         );
     }

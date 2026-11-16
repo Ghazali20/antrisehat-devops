@@ -7,28 +7,103 @@ use App\Models\Doctor;
 use App\Models\Queue;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 
 class KlinikController extends Controller
 {
-    // Halaman Dashboard Web AntriSehat
-    public function index()
+    // 1. PORTAL PASIEN (PUBLIK TANPA LOGIN)
+    public function patientPortal()
     {
         $today = now()->toDateString();
+        $doctors = Doctor::withCount([
+            'queues as today_queue_count' => function ($query) use ($today) {
+                $query->whereDate('queue_date', $today)->where('status', '!=', 'RESET');
+            }
+        ])->get();
+
+        // Info ringkas nomor yang sedang dipanggil per poli untuk pasien
+        $currentlyCalled = Queue::whereDate('queue_date', $today)
+            ->where('status', 'CALLED')
+            ->get()
+            ->keyBy('poli');
+
+        return view('patient.index', compact('doctors', 'currentlyCalled', 'today'));
+    }
+
+    // 2. DASHBOARD DOKTER (WAJIB LOGIN ROLE: DOKTER)
+    public function doctorDashboard(Request $request)
+    {
+        $today = now()->toDateString();
+        $user = Auth::user();
         $doctors = Doctor::all();
-        $activeQueues = Queue::with('doctor')
+
+        // Default filter ke dokter yang login jika terhubung, atau filter pilihan
+        $selectedDoctorId = $request->query('doctor_id', $user->doctor_id);
+
+        $doctorQueues = Queue::with('doctor')
             ->whereDate('queue_date', $today)
-            ->whereIn('status', ['WAITING', 'CALLED'])
-            ->orderBy('id', 'asc')
+            ->where('status', '!=', 'RESET')
+            ->when($selectedDoctorId, fn($q) => $q->where('doctor_id', $selectedDoctorId))
+            ->orderByRaw("CASE status WHEN 'CALLED' THEN 1 WHEN 'WAITING' THEN 2 WHEN 'DONE' THEN 3 WHEN 'SKIPPED' THEN 4 ELSE 5 END")
+            ->orderBy('sequence_num', 'asc')
             ->get();
+
         $appointments = Appointment::with('doctor')
-            ->orderBy('appointment_date', 'desc')
+            ->when($selectedDoctorId, fn($q) => $q->where('doctor_id', $selectedDoctorId))
+            ->orderBy('appointment_date', 'asc')
             ->orderBy('appointment_time', 'asc')
             ->get();
 
-        return view('dashboard', compact('doctors', 'activeQueues', 'appointments', 'today'));
+        return view('doctor.dashboard', compact('doctors', 'doctorQueues', 'appointments', 'today', 'selectedDoctorId'));
     }
 
-    // CRUD Dokter & Jadwal: List & Create
+    // 3. DASHBOARD OPERATOR / ADMIN (WAJIB LOGIN ROLE: OPERATOR)
+    public function operatorDashboard()
+    {
+        $today = now()->toDateString();
+        $doctors = Doctor::withCount([
+            'queues as today_queue_count' => function ($query) use ($today) {
+                $query->whereDate('queue_date', $today)->where('status', '!=', 'RESET');
+            }
+        ])->get();
+
+        $activeQueues = Queue::with('doctor')
+            ->whereDate('queue_date', $today)
+            ->whereIn('status', ['WAITING', 'CALLED'])
+            ->orderBy('sequence_num', 'asc')
+            ->get();
+
+        $calledQueues = $activeQueues->where('status', 'CALLED')->values();
+        $waitingQueues = $activeQueues->where('status', 'WAITING')->values();
+
+        $stats = [
+            'total_today' => Queue::whereDate('queue_date', $today)->where('status', '!=', 'RESET')->count(),
+            'waiting' => $waitingQueues->count(),
+            'called' => $calledQueues->count(),
+            'done' => Queue::whereDate('queue_date', $today)->where('status', 'DONE')->count(),
+            'skipped' => Queue::whereDate('queue_date', $today)->where('status', 'SKIPPED')->count(),
+            'appointments_today' => Appointment::whereDate('appointment_date', $today)->where('status', 'SCHEDULED')->count(),
+        ];
+
+        $dbHealthy = true;
+        try {
+            DB::connection()->getPdo();
+        } catch (\Exception $e) {
+            $dbHealthy = false;
+        }
+
+        return view('operator.dashboard', compact(
+            'doctors',
+            'calledQueues',
+            'waitingQueues',
+            'stats',
+            'today',
+            'dbHealthy'
+        ));
+    }
+
+    // CRUD Dokter & Jadwal
     public function listDoctors()
     {
         return response()->json(['data' => Doctor::all()], 200);
@@ -52,7 +127,7 @@ class KlinikController extends Controller
         if ($request->wantsJson()) {
             return response()->json(['message' => 'Dokter berhasil ditambahkan', 'data' => $doctor], 201);
         }
-        return redirect('/')->with('success', 'Dokter berhasil ditambahkan.');
+        return redirect('/operator')->with('success', "Jadwal {$doctor->name} ({$doctor->poli}) berhasil ditambahkan.");
     }
 
     public function deleteDoctor(Request $request, $id)
@@ -63,7 +138,7 @@ class KlinikController extends Controller
         if ($request->wantsJson()) {
             return response()->json(['message' => 'Dokter berhasil dihapus'], 200);
         }
-        return redirect('/')->with('success', 'Dokter berhasil dihapus.');
+        return redirect('/operator')->with('success', 'Data dokter berhasil dihapus.');
     }
 
     // Ambil Nomor Antrean per Poli (BR-01 & BR-03)
@@ -78,7 +153,7 @@ class KlinikController extends Controller
         $doctor = Doctor::findOrFail($validated['doctor_id']);
         $date = $validated['queue_date'] ?? now()->toDateString();
 
-        // BR-03: Maksimal 30 pasien per sesi dokter pada tanggal tersebut
+        // BR-03: Maksimal 30 pasien per sesi dokter
         $activeSessionCount = Queue::where('doctor_id', $doctor->id)
             ->whereDate('queue_date', $date)
             ->where('status', '!=', 'RESET')
@@ -113,10 +188,21 @@ class KlinikController extends Controller
         if ($request->wantsJson()) {
             return response()->json(['message' => 'Nomor antrean berhasil diterbitkan', 'data' => $queue], 201);
         }
-        return redirect('/')->with('success', "Nomor antrean Anda: {$formattedNumber} ({$doctor->poli})");
+
+        // Kirim data tiket antrean ke session agar langsung tampil kartu tiket cetak di halaman pasien
+        return redirect('/')->with([
+            'success' => "Nomor antrean {$formattedNumber} berhasil diterbitkan!",
+            'issued_ticket' => [
+                'queue_number' => $queue->queue_number,
+                'patient_name' => $queue->patient_name,
+                'poli' => $doctor->poli,
+                'doctor_name' => $doctor->name,
+                'queue_date' => $date,
+            ]
+        ]);
     }
 
-    // Panggil Antrean Berikutnya per Poli
+    // Panggil Antrean Berikutnya per Poli (Dokter)
     public function callNextQueue(Request $request)
     {
         $validated = $request->validate([
@@ -126,13 +212,11 @@ class KlinikController extends Controller
 
         $date = $validated['queue_date'] ?? now()->toDateString();
 
-        // Tandai antrean yang sedang CALLED menjadi DONE
         Queue::where('poli', $validated['poli'])
             ->whereDate('queue_date', $date)
             ->where('status', 'CALLED')
             ->update(['status' => 'DONE']);
 
-        // Ambil antrean WAITING berikutnya
         $next = Queue::where('poli', $validated['poli'])
             ->whereDate('queue_date', $date)
             ->where('status', 'WAITING')
@@ -143,7 +227,7 @@ class KlinikController extends Controller
             $msg = "Tidak ada antrean menunggu di {$validated['poli']}.";
             return $request->wantsJson()
                 ? response()->json(['message' => $msg], 404)
-                : redirect('/')->with('error', $msg);
+                : redirect('/dokter')->with('error', $msg);
         }
 
         $next->update(['status' => 'CALLED']);
@@ -151,10 +235,34 @@ class KlinikController extends Controller
         if ($request->wantsJson()) {
             return response()->json(['message' => 'Memanggil antrean berikutnya', 'data' => $next], 200);
         }
-        return redirect('/')->with('success', "Memanggil nomor antrean {$next->queue_number} - {$next->patient_name}");
+        return redirect('/dokter')->with('success', "Memanggil nomor antrean {$next->queue_number} — {$next->patient_name}");
     }
 
-    // Tampilan Antrean Berjalan
+    // Update Status Antrean Spesifik oleh Dokter
+    public function updateQueueStatus(Request $request, $id)
+    {
+        $validated = $request->validate([
+            'status' => 'required|in:CALLED,DONE,SKIPPED',
+        ]);
+
+        $queue = Queue::findOrFail($id);
+
+        if ($validated['status'] === 'CALLED') {
+            Queue::where('poli', $queue->poli)
+                ->whereDate('queue_date', $queue->queue_date)
+                ->where('status', 'CALLED')
+                ->update(['status' => 'DONE']);
+        }
+
+        $queue->update(['status' => $validated['status']]);
+
+        if ($request->wantsJson()) {
+            return response()->json(['message' => 'Status antrean diperbarui', 'data' => $queue], 200);
+        }
+        return redirect('/dokter')->with('success', "Status antrean {$queue->queue_number} diperbarui menjadi {$validated['status']}.");
+    }
+
+    // Tampilan Antrean Berjalan (JSON API)
     public function runningQueues(Request $request)
     {
         $date = $request->query('date', now()->toDateString());
@@ -179,7 +287,7 @@ class KlinikController extends Controller
         ]);
 
         $doctor = Doctor::findOrFail($validated['doctor_id']);
-        $dayName = Carbon::parse($validated['appointment_date'])->format('l'); // Monday, Tuesday, ...
+        $dayName = Carbon::parse($validated['appointment_date'])->format('l');
 
         // BR-02a: Validasi hari praktik dokter
         if (strcasecmp($dayName, $doctor->practice_day) !== 0) {
@@ -198,7 +306,7 @@ class KlinikController extends Controller
                 : redirect('/')->with('error', $msg);
         }
 
-        // BR-02c: Anti-bentrok slot waktu dokter pada tanggal yang sama
+        // BR-02c: Anti-bentrok slot waktu dokter
         $isConflict = Appointment::where('doctor_id', $doctor->id)
             ->whereDate('appointment_date', $validated['appointment_date'])
             ->where('appointment_time', $reqTime)
@@ -236,6 +344,16 @@ class KlinikController extends Controller
         if ($request->wantsJson()) {
             return response()->json(['message' => 'Janji temu berhasil dibuat', 'data' => $appointment], 201);
         }
-        return redirect('/')->with('success', "Janji temu dengan {$doctor->name} berhasil dijadwalkan.");
+
+        return redirect('/')->with([
+            'success' => "Janji temu dengan {$doctor->name} berhasil dijadwalkan!",
+            'issued_appointment' => [
+                'patient_name' => $appointment->patient_name,
+                'doctor_name' => $doctor->name,
+                'poli' => $doctor->poli,
+                'appointment_date' => $appointment->appointment_date,
+                'appointment_time' => substr($reqTime, 0, 5),
+            ]
+        ]);
     }
 }
