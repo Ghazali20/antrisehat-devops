@@ -1,15 +1,10 @@
 <?php
 
-use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\KlinikController;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Route;
 
-Route::get('/', function () {
-    return response()->json([
-        'app' => 'AntriSehat - Sistem Antrean & Janji Temu Klinik (K05)',
-        'status' => 'running'
-    ]);
-});
-
+// Endpoint wajib /health
 Route::get('/health', function () {
     try {
         DB::connection()->getPdo();
@@ -27,4 +22,23 @@ Route::get('/health', function () {
             'error' => $e->getMessage(),
         ], 503);
     }
+});
+
+// Web UI Routes
+Route::get('/', [KlinikController::class, 'index']);
+Route::post('/doctors', [KlinikController::class, 'storeDoctor']);
+Route::delete('/doctors/{id}', [KlinikController::class, 'deleteDoctor']);
+Route::post('/queues', [KlinikController::class, 'takeQueue']);
+Route::post('/queues/call-next', [KlinikController::class, 'callNextQueue']);
+Route::post('/appointments', [KlinikController::class, 'bookAppointment']);
+
+// REST API Routes (Untuk integrasi & automated testing)
+Route::prefix('api')->group(function () {
+    Route::get('/doctors', [KlinikController::class, 'listDoctors']);
+    Route::post('/doctors', [KlinikController::class, 'storeDoctor']);
+    Route::delete('/doctors/{id}', [KlinikController::class, 'deleteDoctor']);
+    Route::get('/queues/running', [KlinikController::class, 'runningQueues']);
+    Route::post('/queues', [KlinikController::class, 'takeQueue']);
+    Route::post('/queues/call-next', [KlinikController::class, 'callNextQueue']);
+    Route::post('/appointments', [KlinikController::class, 'bookAppointment']);
 });
