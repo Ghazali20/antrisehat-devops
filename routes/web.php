@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\AuthController;
 use App\Http\Controllers\KlinikController;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
@@ -24,15 +25,31 @@ Route::get('/health', function () {
     }
 });
 
-// Web UI Routes
-Route::get('/', [KlinikController::class, 'index']);
-Route::post('/doctors', [KlinikController::class, 'storeDoctor']);
-Route::delete('/doctors/{id}', [KlinikController::class, 'deleteDoctor']);
+// 1. PORTAL PASIEN (Publik Tanpa Login)
+Route::get('/', [KlinikController::class, 'patientPortal']);
 Route::post('/queues', [KlinikController::class, 'takeQueue']);
-Route::post('/queues/call-next', [KlinikController::class, 'callNextQueue']);
 Route::post('/appointments', [KlinikController::class, 'bookAppointment']);
 
-// REST API Routes (Untuk integrasi & automated testing)
+// 2. AUTENTIKASI STAF (Dokter & Operator)
+Route::get('/login', [AuthController::class, 'showLogin'])->name('login');
+Route::post('/login', [AuthController::class, 'login']);
+Route::post('/logout', [AuthController::class, 'logout'])->middleware('auth');
+
+// 3. DASHBOARD DOKTER (Wajib Login Role: dokter)
+Route::middleware(['auth', 'role:dokter'])->group(function () {
+    Route::get('/dokter', [KlinikController::class, 'doctorDashboard']);
+    Route::post('/queues/call-next', [KlinikController::class, 'callNextQueue']);
+    Route::post('/queues/{id}/status', [KlinikController::class, 'updateQueueStatus']);
+});
+
+// 4. DASHBOARD OPERATOR / ADMIN (Wajib Login Role: operator)
+Route::middleware(['auth', 'role:operator'])->group(function () {
+    Route::get('/operator', [KlinikController::class, 'operatorDashboard']);
+    Route::post('/doctors', [KlinikController::class, 'storeDoctor']);
+    Route::delete('/doctors/{id}', [KlinikController::class, 'deleteDoctor']);
+});
+
+// 5. REST API ROUTES (Untuk Automated Testing & Integrasi)
 Route::prefix('api')->group(function () {
     Route::get('/doctors', [KlinikController::class, 'listDoctors']);
     Route::post('/doctors', [KlinikController::class, 'storeDoctor']);
