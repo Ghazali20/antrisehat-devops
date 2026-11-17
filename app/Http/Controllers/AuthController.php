@@ -2,8 +2,8 @@
 
 namespace App\Http\Controllers;
 
-use Database\Seeders\DatabaseSeeder;
 use App\Models\User;
+use Database\Seeders\DatabaseSeeder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
@@ -11,7 +11,6 @@ class AuthController extends Controller
 {
     public function showLogin()
     {
-        // Pastikan akun default tersedia jika database baru dimigrasi
         if (User::count() === 0) {
             (new DatabaseSeeder())->run();
         }
@@ -22,7 +21,16 @@ class AuthController extends Controller
                 : redirect('/operator');
         }
 
-        return view('auth.login');
+        $doctorAccounts = User::with('doctor')
+            ->where('role', 'dokter')
+            ->orderBy('id', 'asc')
+            ->get();
+
+        $operatorAccounts = User::where('role', 'operator')
+            ->orderBy('id', 'asc')
+            ->get();
+
+        return view('auth.login', compact('doctorAccounts', 'operatorAccounts'));
     }
 
     public function login(Request $request)
@@ -36,7 +44,7 @@ class AuthController extends Controller
             $request->session()->regenerate();
 
             $target = Auth::user()->role === 'dokter' ? '/dokter' : '/operator';
-            return redirect()->intended($target)->with('success', 'Selamat datang, ' . Auth::user()->name . '!');
+            return redirect()->intended($target)->with('success', 'Selamat datang, ' . Auth::user()->name . '.');
         }
 
         return back()->withErrors([

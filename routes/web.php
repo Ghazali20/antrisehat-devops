@@ -46,6 +46,7 @@ Route::middleware(['auth', 'role:dokter'])->group(function () {
 Route::middleware(['auth', 'role:operator'])->group(function () {
     Route::get('/operator', [KlinikController::class, 'operatorDashboard']);
     Route::post('/doctors', [KlinikController::class, 'storeDoctor']);
+    Route::put('/doctors/{id}', [KlinikController::class, 'updateDoctor']);
     Route::delete('/doctors/{id}', [KlinikController::class, 'deleteDoctor']);
 });
 
@@ -53,6 +54,7 @@ Route::middleware(['auth', 'role:operator'])->group(function () {
 Route::prefix('api')->group(function () {
     Route::get('/doctors', [KlinikController::class, 'listDoctors']);
     Route::post('/doctors', [KlinikController::class, 'storeDoctor']);
+    Route::put('/doctors/{id}', [KlinikController::class, 'updateDoctor']);
     Route::delete('/doctors/{id}', [KlinikController::class, 'deleteDoctor']);
     Route::get('/queues/running', [KlinikController::class, 'runningQueues']);
     Route::post('/queues', [KlinikController::class, 'takeQueue']);

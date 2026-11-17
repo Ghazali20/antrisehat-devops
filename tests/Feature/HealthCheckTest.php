@@ -15,7 +15,7 @@ class HealthCheckTest extends TestCase
     {
         $response = $this->get('/');
         $response->assertStatus(200)
-                 ->assertSee('Layanan Mandiri Pasien');
+                 ->assertSee('Registrasi Mandiri Pasien');
     }
 
     public function test_health_endpoint_returns_200(): void
