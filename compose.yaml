@@ -20,7 +20,7 @@ services:
       start_period: 20s
 
   app:
-    image: ${DOCKERHUB_IMAGE:-rafli/antrisehat:latest}
+    image: ${DOCKERHUB_IMAGE:-rafliriandraa/antrisehat:latest}
     build:
       context: .
       target: production
@@ -47,7 +47,7 @@ services:
       start_period: 20s
 
   scheduler:
-    image: ${DOCKERHUB_IMAGE:-rafli/antrisehat:latest}
+    image: ${DOCKERHUB_IMAGE:-rafliriandraa/antrisehat:latest}
     container_name: antrisehat-scheduler
     restart: unless-stopped
     env_file:
