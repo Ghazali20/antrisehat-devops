@@ -1,16 +1,12 @@
 <?php
 
-namespace Tests\Unit;
+test('that true is true', function () {
+    expect(true)->toBeTrue();
+});
 
-use PHPUnit\Framework\TestCase;
-
-class ExampleTest extends TestCase
-{
-    /**
-     * A basic test example.
-     */
-    public function test_that_true_is_true(): void
-    {
-        $this->assertTrue(true);
-    }
-}
+test('qa environment and application configuration check', function () {
+    expect(PHP_VERSION_ID)->toBeGreaterThanOrEqual(80200);
+    expect(file_exists(__DIR__ . '/../../composer.json'))->toBeTrue();
+    expect(file_exists(__DIR__ . '/../../Dockerfile'))->toBeTrue();
+    expect(file_exists(__DIR__ . '/../../compose.yaml'))->toBeTrue();
+});
